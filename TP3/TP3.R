@@ -1,0 +1,197 @@
+library(ggplot2)
+library(car)
+library(leaps)
+library(lmtest)
+
+#On importe les donnes
+cars <- datasets::cars
+head(cars)
+
+# Q1 On represente le nuage de points des distances en fonction des vitesses
+ggplot()+
+  geom_point(data=cars,aes(x=speed,y=dist))+
+  xlab("Speed")+
+  ylab("Distance")
+
+# Q2 On effectuer une r¨¦gression lineaire simple
+reg_simp <- lm(dist~speed,data=cars)
+reg_simp
+names(reg_simp)
+summary(reg_simp)
+
+# Q3 On represente graphiquement la droite de regression
+ggplot()+
+  geom_point(data=cars,aes(x=speed,y=dist))+
+  stat_smooth(data=cars,aes(x=speed,y=dist),method="lm",se=FALSE)+
+  xlab("Speed")+
+  ylab("Distance")
+
+# Q4 On effectue une prevision des vitesse de 0 et 40 
+a_prevoir <- data.frame(speed=0)
+prev <- predict(reg_simp,a_prevoir)
+round(prev,digits=2)
+
+a_prevoir <- data.frame(speed=40)
+prev <- predict(reg_simp,a_prevoir)
+round(prev,digits=2)
+
+ 
+data(state)
+state <- data.frame(state.x77,row.names=state.abb)
+
+# Q5 On effectue une regression lineaire multiple
+reg_multi <- lm(Life.Exp~Population+Income+Illiteracy+Murder+HS.Grad+Frost+Area,data=state)
+summary(reg_multi)
+
+# Q6&Q7 On retire Area
+reg_multi <- lm(Life.Exp~Population+Income+Illiteracy+Murder+HS.Grad+Frost,data=state)
+summary(reg_multi)
+
+# On retire Illiteracy
+reg_multi <- lm(Life.Exp~Population+Income+Murder+HS.Grad+Frost,data=state)
+summary(reg_multi)
+
+# On retire Income
+reg_multi <- lm(Life.Exp~Population+Murder+HS.Grad+Frost,data=state)
+summary(reg_multi)
+
+# Q8 On initialise l'analyse
+alpha <- 0.05
+n <- dim(state)[1]
+p <- 4
+analyses <- data.frame(obs=1:n)
+
+# On calcule les leviers
+analyses$levier <- hat(model.matrix(reg_multi))
+seuil_levier <- 2*p/n
+
+ggplot(data=analyses,aes(x=obs,y=levier))+
+  geom_bar(stat="identity",fill="steelblue")+
+  geom_hline(yintercept=seuil_levier,col="red")+
+  theme_minimal()+
+  xlab("Observation")+
+  ylab("Leviers")+
+  scale_x_continuous(breaks=seq(0,n,by=5))
+
+idl <- abs(analyses$levier)>seuil_levier
+analyses$levier[idl]
+
+# On calcule les r¨¦sidus studentis¨¦s
+analyses$rstudent <- rstudent(reg_multi)
+seuil_rstudent <- qt(1-alpha/2,n-p-1)
+
+ggplot(data=analyses,aes(x=obs,y=rstudent))+
+  geom_bar(stat="identity",fill="steelblue")+
+  geom_hline(yintercept=-seuil_rstudent,col="red")+
+  geom_hline(yintercept=seuil_rstudent,col="red")+
+  theme_minimal()+
+  xlab("Observation")+
+  ylab("R¨¦sidus studentis¨¦s")+
+  scale_x_continuous(breaks=seq(0,n,by=5))
+
+ids <- abs(analyses$rstudent)>seuil_rstudent
+analyses$rstudent[ids]
+
+# On calcule les distances de Cook
+influence <- influence.measures(reg_multi)
+names(influence)
+colnames(influence$infmat)
+analyses$dcook <- influence$infmat[,"cook.d"]
+seuil_dcook <- 4/(n-p)
+
+ggplot(data=analyses,aes(x=obs,y=dcook))+
+  geom_bar(stat="identity",fill="steelblue")+
+  geom_hline(yintercept=seuil_dcook,col="red")+
+  theme_minimal()+
+  xlab("Observation")+
+  ylab("Distance de Cook")+
+  scale_x_continuous(breaks=seq(0,n,by=5))
+
+idc <- analyses$dcook>seuil_dcook
+analyses$dcook[idc]
+
+vif(reg_multi)
+
+bptest(reg_multi)
+
+shapiro.test(reg_multi$residuals)
+
+# Q9 On procede a une selection automatique de modeles
+reg_null <- lm(Life.Exp~1,data=state)
+reg_tot <- lm(Life.Exp~Population+Income+Illiteracy+Murder+HS.Grad+Frost+Area,data=state)
+
+# On utilise la methode backward
+reg_backward <- step(reg_tot,direction="backward")
+
+# On utilise la methode forward
+reg_forward <- step(reg_null,scope=formula(reg_tot),direction="forward")
+
+# On utilise la methode stepwise
+reg_forward <- step(reg_null,scope=formula(reg_tot),direction="both")
+
+# Q10 On separer aleatoirement l¡¯echantillon en 2 parties
+select <- sample(1:n,round(n*0.8))
+state_apprent <- state[select,]
+state_test <- state[-select,]
+reg_multi_apprent <- lm(Life.Exp~Population+Murder+HS.Grad+Frost,data=state_apprent)
+summary(reg_multi_apprent)
+state_test$Life.Exp_prev <- predict(reg_multi_apprent,state_test)
+state_test$err_prev <- state_test$Life.Exp-state_test$Life.Exp_prev
+
+# On estime les RMSE et MAPE
+rmse <- sqrt(mean((state_test$err_prev)^2))
+round(rmse,digits=2)
+
+mape <- mean(abs(state_test$Life.Exp_prev/state_test$Life.Exp-1))*100
+round(mape,digits=2)
+
+# Q11 On reiterer la question 10
+select <- sample(1:n,round(n*0.8))
+state_apprent <- state[select,]
+state_test <- state[-select,]
+reg_multi_apprent <- lm(Life.Exp~Population+Murder+HS.Grad+Frost,data=state_apprent)
+summary(reg_multi_apprent)
+state_test$Life.Exp_prev <- predict(reg_multi_apprent,state_test)
+state_test$err_prev <- state_test$Life.Exp-state_test$Life.Exp_prev
+
+# On estime les RMSE et MAPE
+rmse <- sqrt(mean((state_test$err_prev)^2))
+round(rmse,digits=2)
+
+mape <- mean(abs(state_test$Life.Exp_prev/state_test$Life.Exp-1))*100
+round(mape,digits=2)
+
+# Q12 La validation crois¨¦e
+nbloc <- 5
+bloc <- sample(rep(1:nbloc,length.out=n))
+
+cv <- data.frame(Bloc=numeric(),RMSE=numeric(),MAPE=numeric())
+
+for(i in 1:nbloc){
+  cv[i,"Bloc"] <- i
+  
+  state_apprent <- state[bloc!=i,]
+  state_test <- state[bloc==i,]
+  
+  reg_apprent <- lm(Life.Exp~Population+Murder+HS.Grad+Frost,data=state_apprent)
+  
+  Life.Exp_prev <- predict(reg_apprent,state_test)
+  
+  cv[i,"RMSE"] <- sqrt(mean((state_test$Life.Exp-Life.Exp_prev)^2))
+  cv[i,"MAPE"] <- mean(abs(1-Life.Exp_prev/state_test$Life.Exp))*100
+}
+
+print(paste("RMSE CV :",round(mean(cv$RMSE),digits=2)))
+print(paste("MAPE CV :",round(mean(cv$MAPE),digits=2)))
+
+ggplot()+
+  geom_bar(data=cv,aes(x=Bloc,y=RMSE),stat="identity",fill="steelblue")+
+  geom_hline(aes(yintercept=mean(cv$RMSE),colour="RMSE CV"),lwd=1)+
+  labs(x="Bloc",y="RMSE",title="Validation crois¨¦e")+
+  scale_colour_manual("",values="red")
+
+ggplot()+
+  geom_bar(data=cv,aes(x=Bloc,y=MAPE),stat="identity",fill="steelblue")+
+  geom_hline(aes(yintercept=mean(cv$MAPE),colour="MAPE CV"),lwd=1)+
+  labs(x="Bloc",y="MAPE (%)",title="Validation crois¨¦e")+
+  scale_colour_manual("",values="red")
